@@ -1,0 +1,245 @@
+---
+title: "Final Project - Final Report"
+author: "Srikar Lanka"
+date: "4/28/2024"
+output: pdf_document
+geometry: left=0.5in,right=0.5in,top=0.5in,bottom=0.5in
+urlcolor: blue
+---
+
+```{r setupFiles, include = FALSE}
+# This template file is based off of a template created by Alex Hayes
+# https://github.com/alexpghayes/rmarkdown_homework_template
+
+# Setting Document Options
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+```
+
+# Initial Setup
+## Important Packages
+```{r}
+library(tidyverse)
+library(dcData)
+library(janitor)
+library(devtools)
+
+library(esquisse)
+library(mosaic)
+library(mosaicData)
+library(ggplot2)
+```
+
+## Isolate Datasets
+```{r}
+evData <- read.csv("Electric_Vehicle_Population_Data.csv")
+demographicData <- ZipDemography %>%
+  mutate(ZIP = as.integer(ZIP))   
+```
+
+## Learn More About the Data
+```{r}
+glimpse(evData)
+print("---")
+glimpse(demographicData)
+print("---")
+names(demographicData)
+```
+
+## Select Rows of Interest and Clean-Up Data
+```{r}
+evData <-
+  evData %>%
+    select("VIN..1.10.", County, City, State, Postal.Code) %>% #Select columns of interest from evData
+    filter(State == "WA") %>% # Filter for cars registered in the State of Washington
+    rename(VIN = "VIN..1.10.") # Rename VIN to a more usable name
+```
+
+```{r}
+demographicData <-
+  demographicData %>%
+    select(Totalpopulation, MedianAge, X65yearsandover, Asian, Bachelorsdegreeorhigher, Meantraveltimetoworkinminutespopulation16yearsandolder, Medianhouseholdincomedollars, ZIP) %>% #Select Data of Interest
+    rename(Population = Totalpopulation) %>% #Rename Long/Redudndant Names to more usable names
+    rename("SixtyFivePlus" = X65yearsandover) %>% 
+    rename("BachelorsDegree" = Bachelorsdegreeorhigher) %>% 
+    rename("MeanTravelTime" = Meantraveltimetoworkinminutespopulation16yearsandolder) %>% 
+    rename("MedianHouseholdIncome" = Medianhouseholdincomedollars) %>% 
+    drop_na() #Drop Empty Values
+```
+
+
+# Background Information
+## Guiding Research Question:
+In this project, my ultimate goal is to find what demographics are critical indicators of high EV ownership on a county level. I hope to accomplish this task by comparing the rates of EV ownership vs the general demographic makeups of various counties in the State of Washington.
+
+## Why is this Topic Interesting:
+This topic is certainly a very interesting one to investigate because of the sheer rate at which we have seen electric cars grow in the United States. They have been exponentially becoming more popular as technology has improved, and it can be interesting to take a step back and try to gain a greater understanding of whether any demographics are driving this increase in adoption.
+
+The implications of a broader study on these topics are twofold. Companies could better market their cars to demographics that are not currently interested in them while also focusing on counties where there is a demographic of interest for their cars. Governments could use this data to see where they may need to focus on regulatory efforts. 
+
+This project also represents a chance to investigate something fascinating. I hope to learn more about this topic in general. 
+
+# Analysis
+## Analysis Set-Up (Join and Clean-Up)
+### Note: 
+["Referenced Website"](https://www.geeksforgeeks.org/sum-across-multiple-rows-and-columns-using-dplyr-package-in-r/)
+```{r}
+JoinData <- 
+  evData %>% 
+    group_by(County, Postal.Code) %>%
+    summarise(totalCar = n()) %>% #Group_By County and Postal Code and then find the number of cars in each combination
+    inner_join(demographicData, by=c("Postal.Code"="ZIP")) %>% #Join with the demographic data on Zip-Codes
+    select(-c(Postal.Code)) %>% # Drop the Zip Code Column
+    group_by(County) %>%  
+    mutate(totalCar = sum(totalCar), Population = sum(Population), MedianAge = median(MedianAge), SixtyFivePlus = sum(SixtyFivePlus), Asian = sum(Asian), BachelorsDegree = sum(BachelorsDegree), MeanTravelTime = mean(MeanTravelTime), MedianHouseholdIncome = median(MedianHouseholdIncome)) %>% # Group by County and combine all the county values into one
+  distinct() #Due to grouping, rows were repeating and only distinct rows are kept
+```
+## Demographics Overview
+```{r, fig.width = 14}
+longerTable <-
+  JoinData %>% 
+    pivot_longer(cols=c("totalCar", "Population", "MedianAge", "SixtyFivePlus", "Asian", "BachelorsDegree", "MeanTravelTime", "MedianHouseholdIncome"),
+                      names_to='Demographic',
+                      values_to='Value') # Pivot into a longer format where each chosen deomgraphic is in a list
+
+longerTable %>% 
+  pivot_wider(names_from = County, values_from = Value) # Pivot back to a different table that shows the demographics in a county by county basis
+```
+
+## Cars per Ten Thousand People
+```{r, fig.width = 14}
+JoinData <-
+  JoinData %>%
+    mutate(carsPerThousand = (totalCar/Population) * 1000) %>%
+    mutate(carsPerThousand = round(carsPerThousand)) #Create a metric called carsPerThousand which is the cars per thousand residents
+  print(JoinData)
+  
+JoinData %>%  
+  ggplot(aes(x = carsPerThousand, y = County)) +  # CarsPerThousand vs. County
+  geom_point(aes(size = carsPerThousand), alpha = 0.7) + 
+  ggtitle("Electric Cars Per Thousand People in Each County") +
+  xlab("Cars Per Thousand People") + 
+  theme_minimal()
+```
+This is a fairly introductory graph, yet it is very critical for what I am trying to do. It is effectively the Cars per Thousand People in each county, with the size of the point also representing how many cars there are per person. So, why is this graph so critical? It is what will allow me to isolate the counties that have a high EV population and a low EV population to see the demographcs that influence those changes. This is why this graph is very critical. 
+
+![Image of Counties of Interest](PointsofInterest.png)
+
+### Filter for Conties of Interest
+```{r}
+filteredData <-
+  JoinData %>%
+    filter(carsPerThousand >= 20 | carsPerThousand <= 5) # Filter for counties of interest
+
+filteredData %>%
+  ggplot(aes(x = carsPerThousand, y = County)) + 
+  geom_point(aes(size = carsPerThousand), alpha = 0.7) + 
+  ggtitle("Electric Cars Per Thousand People in Each County") +
+  xlab("Cars Per Thousand People") + 
+  theme_minimal() #Replot with only the new counties of interest
+```
+Using the knowledge provided to us in the first graph, we are now able to cut down the counties to simply the ones we are interested in. We have 7 counties where there are more then 20 cars per thousand people and 9 with less then 5 cars per thousand people. These are the counties that are the most "extreme" and the hope is we can extract the demographic makeup that matters from each one. 
+
+## Analysis of Age as an Indicator
+```{r, fig.width = 14}
+filteredData %>%
+  ggplot(aes(x = County)) + 
+  geom_point(aes(y = MedianAge)) + #Plotting MedianAge by Points 
+  geom_boxplot(aes(y = carsPerThousand, color=SixtyFivePlus)) + #Colored Boxplots to represent the carsPerThousand and the number who are 65+ in said county
+  ggtitle("Mean Age per County Compared to Cars Per Thousand People", subtitle = "With additional consideration for the population above 65 years") +
+  ylab("Number of Value") +
+  theme_minimal()
+```
+There is certainly a lot to see in this graph, but overall it is very simple yet a great indicator of wether age is a factor when it comes to Electric Car ownership. Effectively, this is a graph of the Counties, which each dot representing the median age in the county and each line representing the cars per thousand people in that county. The lines are additonally colored to represent the number of people who are 65+ in each if these counties. Overall, we are able to see that there seems to be no real correlation in terms of age and EV ownerships. Some of these counties below 10 cars per thousand people have fairly young populations yet also low ammount of electric vehicles. Although one could argue there is a weak correlation, I disagree with this assessment because the median age in the State of Washington is fairly consistent. 
+
+
+```{r, fig.width = 14}
+filteredData %>%
+  mutate(percentOverSixtyFive = (SixtyFivePlus/Population)*100) %>% #Adjusting previous visualizaiton for the percentage of population 65+
+  ggplot(aes(x = County)) + 
+  geom_point(aes(y = MedianAge)) +
+  geom_boxplot(aes(y = carsPerThousand, color=percentOverSixtyFive)) +
+  ggtitle("Mean Age per County Compared to Cars Per Thousand People", subtitle = "With additional consideration for the percent of the population above 65 years") +
+  labs(caption="Point is Mean Age, Line is Cars per Thousand People, Color is 65+ Representing by the Key Per County.") +
+  ylab("Number of Value") +
+  theme_minimal()
+```
+This is simply a slight modication to the graph above with the percentages of the population who are over 65+. This graph definetly reaffirms my previous assertion related to age being a releative nonfactor as there are counties that are very young with also low ammounts of ev ownership. 
+
+## Analysis of Mean Travel Time
+```{r, fig.width = 14}
+filteredData %>%
+  ggplot(aes(x = MeanTravelTime)) +
+  geom_point(aes(y = carsPerThousand, color = County), shape = "circle", size = 1.5) +
+  scale_color_hue(direction = 1) +
+  theme_minimal() + #Plotting the Mean Travel Time vs. the Cars Per Thousand Residents in each county with an added linear line
+  geom_smooth(aes(y = carsPerThousand), method=lm) +
+  ggtitle("Mean Travel Time Per Thousand People in Each County") +
+  xlab("Mean Travel Time (Minutes)") + 
+  ylab("Electric Vehicles per Thousand Residents")
+```
+This is a graph that showcases the Man Travel Time vs the EV per thousand people rate with each point representing the counties. There is a linear line added overtop that tries to find the general trend. Overall, we find a weak positive correlation between the travel time and the ammount of EVs a county may have. Although this culd be driven by outliers, I feel this could be a good indicator as the more a county drives the more they want to save on gas, and thus this could be one indicator. 
+
+## Asian Demographic per County
+```{r, fig.width = 14, error=TRUE}
+filteredData %>%
+  mutate(percentAsian = (Asian/Population) *100) %>% #Calculate Asian Percentage per County
+  ggplot() +
+  aes(x = percentAsian, y = carsPerThousand) + 
+  geom_point(shape = "circle", size = 1.5, colour = "#112446") +
+  theme_minimal() +
+  facet_wrap(vars(County)) # Graph of the percentage of asian population vs Cars per Thousand Residents faceted by County
+```
+This is a graph of the percent of a county that is Asian vs. the Cars per Thousand people, with each grid representing a specific county. Overall, I believe there is a correlation between the Asian Population and the Cars a county has. Outside of San Juan county, every other county with a asian population of greater then 3% has a fairly high EV population. 
+
+## Education Level
+```{r, fig.width = 14}
+filteredData %>%
+  mutate(percentCollegeGrad = (BachelorsDegree/Population) *100) %>%
+  ggplot() +
+  aes(
+    x = percentCollegeGrad,
+    y = County,
+    colour = carsPerThousand
+  ) +
+  geom_boxplot(fill = "#112446") +
+  scale_color_gradient() +
+  theme_minimal() #Graph showcasing the percentage of a county that is a college graduate with attention to the cars per thousand 
+```
+This is a graph of the percentage of a county that has a Bachelors degree or higher, with the lines representing the percentage and its color representing the cars per thousand people. Overall, I believe there is a link between the ammount of college educated populace and the cars, as we see that the lines get lighter the more educated a county is. 
+
+## Income
+```{r, fig.width = 14}
+filteredData %>%
+  mutate(twentyorGreaterCars = ifelse(carsPerThousand >= 20, 20, 0)) %>%
+  ggplot() +
+  aes(x = MedianHouseholdIncome, fill = County) +
+  geom_histogram(bins = 30L) +
+  scale_fill_hue(direction = 1) +
+  theme_minimal() +
+  facet_grid(vars(twentyorGreaterCars)) # Graph showcasing the MedianHouseHoldIncome per county with respect to the number of Cars per Thousand Residents 
+```
+This is a graph of the Median Household Income per county, with the colors representing the various counties. This graph is split into two sections, the top graph being counties with less then 20 cars per thousand people and the bottom being more. We are able to see that income is certainly an additonal factor considering that the counties with a income of greater then 40,000 also have more then 20 cars per thousand people. 
+
+# Conclusion
+## Challenge Encountered
+The project went well, and I am very proud of my work. That being said, there was one challenge that, although I did eventually overcome in the end, eventually haunted me from the definitely the project. This challenge was the nature of the data.
+
+Firstly, due to the data's complexity (especially that of zipDemography), the initial joins I tried to do led to N/As when I tried a join with evData since there were a lot of zip codes that did not match up as well as I thought. I then had the issue where there were multiple duplicate rows, each with its own data, though that was overcome through grouping by county, combining like rows, and only keeping distinct rows.
+
+However, the true challenge came during graphs. Due to the nature of the data being simple points rather than a series of data, a lot of graphs I wanted to do and got accustomed to in the class were not at my disposal. I had to create a variety of graph combinations that were definitely new to me, but they provided me with great new insights.
+
+## Final Conclusions
+Based on the analysis above, we are able to conclude that there is likely three key demographics that influence the ammount of electric vehicles in a county: Income, Education, and the Asian Population. There is additionally an argument to be made for the Mean Travel Time. Overall, these findings are not solid, but rather they are able to serve as a basis for a future quantative or qualitative study. However, for the sake of my work, I feel confident that these demographics certainly do potentially play a part in indicators for electric vehicles. 
+
+\newpage
+
+# Code Appendix
+
+```{r codeAppendix, ref.label = knitr::all_labels(), echo = TRUE, eval = FALSE}
+
+```
